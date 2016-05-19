@@ -1,0 +1,8 @@
+/env
+/dist
+/dcos_management.egg-info
+/build
+__pycache__
+.atom-build.yml
+test.sh
+
