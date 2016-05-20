@@ -25,6 +25,5 @@ mesos04.local  DRAINING
 
 ```
 #### Limitations
-- you can set up only one maintenance window at a time
-- you can't make a transition from DRAINING to UP directly. You must mark it as DOWN first
-
+- maintenance window may be overriden
+- sequential operations on hosts
