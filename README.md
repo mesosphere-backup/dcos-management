@@ -10,7 +10,7 @@ To understand how mesos deal with maintenance of agents, please read [mesos docu
 
 Also, instead of nanoseconds, `maintenance` subcommands expect seconds. This may change in a future release.
 
-Per default, downtime windows is one hour.
+Per default, maintenance window is one hour.
 
 #### Examples
 ##### Announce reverse offers from now for 2 hours 
@@ -79,6 +79,7 @@ mesos-agent00.local  DOWN   1463863101      3600
 #### Limitations
 - flushing all maintenance schedules silently fails if at least one host is DOWN.
 - marking an host as DOWN is a sequential operation
+
 #### ToDo
 - fix flush
 - more doc
