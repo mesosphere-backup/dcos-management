@@ -2,8 +2,10 @@
 
 Usage:
     dcos management --info
-    dcos management maintenance (--list | --down | --start=<date> | --up ) [--duration=<duration>] [<hostname>...]
-    dcos management reservation (--add | --remove) --resource-string=<resources> --principal=<principal>
+    dcos management maintenance list [--json]
+    dcos management maintenance up <hostname>...
+    dcos management maintenance down <hostname>...
+    dcos management maintenance schedule ( --start=<date> | --flush ) [--duration=<duration>] [<hostname>...]
 
 Options:
     --help           Show this screen
@@ -57,9 +59,24 @@ def _cmds():
             function=_info),
 
         cmds.Command(
-            hierarchy=['management','maintenance'],
-            arg_keys=['--list','--down', '--start', '--up', '--duration', '<hostname>'],
-            function=maintenance._maintenance),
+            hierarchy=['management','maintenance', 'list'],
+            arg_keys=['--json'],
+            function=maintenance.list),
+
+        cmds.Command(
+            hierarchy=['management','maintenance', 'up'],
+            arg_keys=['<hostname>'],
+            function=maintenance.up),
+
+        cmds.Command(
+            hierarchy=['management','maintenance', 'down'],
+            arg_keys=['<hostname>'],
+            function=maintenance.down),
+
+        cmds.Command(
+            hierarchy=['management','maintenance', 'schedule'],
+            arg_keys=['--start', '--flush', '--duration', '<hostname>'],
+            function=maintenance.schedule_maintenance),
     ]
 
 def _info():
