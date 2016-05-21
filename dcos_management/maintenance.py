@@ -2,12 +2,8 @@ import socket
 import json
 import time
 
-import docopt
-from dcos import cmds, emitting, http, util, mesos
-from dcos.errors import DCOSException
-from dcos_management import constants
+from dcos import emitting, http, util, mesos
 from dcos_management import tables
-from dcoscli.util import decorate_docopt_usage
 
 emitter = emitting.FlatEmitter()
 logger = util.get_logger(__name__)
@@ -126,3 +122,5 @@ def _maintenance(list, down, start, up, duration, hostnames):
                         emitter.publish(h + " is now DOWN")
                     except:
                         raise
+                if h == maintenance_status[j]['hostname'] and maintenance_status[j]['state'] == 'DOWN':
+                    emitter.publish(h + " is already down --  ignoring")
