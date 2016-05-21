@@ -8,7 +8,7 @@ DCOS Management Subcommand
 
 To understand how mesos deal with maintenance of agents, please read [mesos documentation](http://mesos.apache.org/documentation/latest/maintenance/).
 
-Also, instead of milliseconds, `maintenance` subcommands expect seconds. This may change in a future release.
+Also, instead of nanoseconds, `maintenance` subcommands expect seconds. This may change in a future release.
 
 Per default, downtime windows is one hour.
 
