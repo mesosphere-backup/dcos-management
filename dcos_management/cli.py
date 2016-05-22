@@ -5,7 +5,8 @@ Usage:
     dcos management maintenance list [--json]
     dcos management maintenance up <hostname>...
     dcos management maintenance down <hostname>...
-    dcos management maintenance schedule ( --start=<date> | --flush ) [--duration=<duration>] [<hostname>...]
+    dcos management maintenance schedule add [--start=<date>] [--duration=<duration>] [<hostname>...]
+    dcos management maintenance schedule flush  [<hostname>...]
 
 Options:
     --help           Show this screen
@@ -74,9 +75,15 @@ def _cmds():
             function=maintenance.down),
 
         cmds.Command(
-            hierarchy=['management','maintenance', 'schedule'],
-            arg_keys=['--start', '--flush', '--duration', '<hostname>'],
+            hierarchy=['management','maintenance', 'schedule', 'flush'],
+            arg_keys=['<hostname>'],
+            function=maintenance.flush_schedule),
+
+        cmds.Command(
+            hierarchy=['management','maintenance', 'schedule', 'add'],
+            arg_keys=['--start', '--duration', '<hostname>'],
             function=maintenance.schedule_maintenance),
+
     ]
 
 def _info():

@@ -14,6 +14,8 @@ def maintenance_table(maintenance):
 
     fields = OrderedDict([
         ("HOST", lambda t: t["hostname"]),
+        ("IP", lambda t: t["ip"]),
+        ("ID", lambda t: t["id"]),
         ("STATE", lambda t: t["state"]),
         ("START", lambda t: t["start"]),
         ("DURATION", lambda t: t["duration"]),
@@ -22,6 +24,8 @@ def maintenance_table(maintenance):
 
     tb = dcoscli_tables.table(fields, maintenance, sortby="STATE")
     tb.align["HOST"] = "l"
+    tb.align["IP"] = "l"
+    tb.align["ID"] = "l"
     tb.align["STATE"] = "l"
     tb.align["START"] = "l"
     tb.align["DURATION"] = "r"

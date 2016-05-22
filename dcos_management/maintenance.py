@@ -12,7 +12,26 @@ DEFAULT_DURATION = 3600
 emitter = emitting.FlatEmitter()
 logger = util.get_logger(__name__)
 
-def get_maintenance_status(dcos_client, hostnames=[]):
+# XXX: first match win
+def find_machine_ids(slaves, host):
+    for i in range(len(slaves)):
+        s = slaves[i]
+        if host in [s["hostname"], s["ip"], s["id"]]:
+            return {"hostname": s["hostname"], "ip": s["ip"]}
+    return None
+
+def compare_machine_ids( machine_id_a, machine_id_b):
+    if machine_id_a["hostname"] == machine_id_b["hostname"] and machine_id_a["ip"] == machine_id_b["ip"]:
+       return True
+    return False
+
+def find_matching_slave(slaves, machine_id):
+    for i in range(len(slaves)):
+        if compare_machine_ids(slaves[i], machine_id):
+            return slaves[i]
+    return None
+
+def get_maintenance_status(dcos_client, slaves=[]):
     """
     :param dcos_client: DCOSClient
     :type dcos_client: DCOSClient
@@ -22,39 +41,39 @@ def get_maintenance_status(dcos_client, hostnames=[]):
     :rtype: list,list
     """
     maintenance_status = []
-
     try:
         url = dcos_client.master_url('maintenance/status')
         req = http.get(url).json()
+        # XXX: to refactor
         if 'draining_machines' in req:
             machine_ids = req['draining_machines']
-            for i in range(len(machine_ids)):
-                if "ip" in machine_ids[i]['id']:
-                    host = machine_ids[i]['id']['ip']
+            for m in machine_ids:
+                machine_id = m['id']
+                slave = find_matching_slave(slaves,machine_id)
+                if not slave:
+                    machine_id["id"] = ""
                 else:
-                    host = machine_ids[i]['id']['hostname']
-                maintenance_status.append({'hostname': host, 'state': "DRAINING"})
+                    machine_id = slave
+                machine_id["state"] = "DRAINING"
+                maintenance_status.append(machine_id)
         if 'down_machines' in req:
             machine_ids = req['down_machines']
             for m in machine_ids:
-                if "ip" in m:
-                    host = m["ip"]
+                machine_id = m
+                slave = find_matching_slave(slaves,machine_id)
+                if not slave:
+                    machine_id["id"] = ""
                 else:
-                    host = m["hostname"]
-                maintenance_status.append({'hostname': host, 'state': 'DOWN'})
+                    machine_id = slave
+                machine_id["state"] = "DOWN"
+                maintenance_status.append(machine_id)
+        return maintenance_status
     except DCOSException as e:
         logger.exception(e)
-    except Exception:
-        raise DCOSException("Unable to fetch maintenance status from mesos master")
+    except Exception as (e):
+        raise DCOSException("Unable to fetch maintenance status from mesos master: " + str(e))
 
-    found = dict()
-    for h in hostnames:
-        for j in range(len(maintenance_status)):
-            if h == maintenance_status[j]['hostname']:
-                found[h] = 1
-    return maintenance_status, found
-
-def get_schedules(dcos_client):
+def get_scheduled(dcos_client):
     """
     :param dcos_client: DCOSClient
     :type dcos_client: DCOSClient
@@ -72,152 +91,71 @@ def get_schedules(dcos_client):
     except Exception:
         raise DCOSException("Unable to fetch scheduled maintenance windows from mesos master")
 
-def get_machine_ids(hostnames):
-    """
-    :param hostnames:
-    :type hostnames: array
-    :retuns:
-    :rtype:
-    """
-    machine_ids = []
-    for s in hostnames:
-        key = ""
-        try:
-            socket.inet_aton(s)
-            key = "ip"
-        except:
-            key = "hostname"
-        item = dict()
-        item[key] = s
-        machine_ids.append(item)
-    return machine_ids
 
-def get_machine_ids_dict(hostnames):
-    """
-    :param hostnames:
-    :type hostnames: array
-    :retuns:
-    :rtype: dict()
-    """
-    machine_ids = dict()
-
-    for s in hostnames:
-        machine_ids[s] = 1
-
-    return machine_ids
-
-def list(json_):
-    dcos_client = mesos.DCOSClient()
-    full_maintenance_status = []
-
-    maintenance_status, _ = get_maintenance_status(dcos_client)
-    current_scheduled = get_schedules(dcos_client)
-    # # XXX: fix me python 3.x
-    # machine_ids = get_machine_ids_dict(maintenance_status[0].keys())
-
-    for e in maintenance_status:
-        e["start"] = "None"
-        e["duration"] = None
-        if current_scheduled:
-            for i in range(len(current_scheduled['windows'])):
-                sched = current_scheduled['windows'][i]
-                for j in range(len(sched['machine_ids'])):
-                    if 'ip' in sched['machine_ids'][j]:
-                        t = sched['machine_ids'][j]['ip']
-                    else:
-                        t = sched['machine_ids'][j]['hostname']
-                    if t == e["hostname"]:
-                        e["start"] = long(sched['unavailability']['start']['nanoseconds']) / stons
-                        e["duration"] = long(sched['unavailability']['duration']['nanoseconds']) / stons
-        full_maintenance_status.append(e)
-
-
-    emitting.publish_table(emitter, full_maintenance_status, tables.maintenance_table, json_)
-
-def up(hostnames):
-    """
-    :param hostnames:
-    :type hostnames: array
-    :retuns:
-    :rtype:
-    """
-    if not hostnames:
-        raise DCOSException("You must define at least one hostname")
-
-    dcos_client = mesos.DCOSClient()
-    maintenance_status, found = get_maintenance_status(dcos_client, hostnames)
-    if len(maintenance_status) == 0:
-        emitter.publish("No maintenance schedule found on mesos master")
-        return 0
-
-    to_up = []
-    for h in hostnames:
-        toSkip = mayBeUp = isDown = isDraining = 0
-        for j in range(len(maintenance_status)):
-            if h != maintenance_status[j]['hostname']:
-                toSkip = 1
-                continue
-            if maintenance_status[j]['state'] == 'DOWN':
-                to_up.append(maintenance_status[j])
-            elif maintenance_status[j]['state'] == 'DRAINING':
-                emitter.publish(h + " is now not down --  flushing schedule")
-                schedule_maintenance(None, True, None, [h])
-            else:
-                emitter.publish(h + " has no schedule for maintenance")
-    try:
-        url = dcos_client.master_url('machine/up')
-        http.post(url, data=None, json=to_up)
-        emitter.publish("submitted hosts are now UP")
-    except DCOSException as e:
-        logger.exception(e)
-    except Exception:
-        raise DCOSException("Can't complete operation on mesos master")
-    return 0
-
-def down(hostnames):
-    """
-    :param hostnames:
-    :type hostnames: array
-    :retuns:
-    :rtype:
-    """
-    dcos_client = mesos.DCOSClient()
-    maintenance_status, found = get_maintenance_status(dcos_client, hostnames)
-    if not hostnames:
-        raise DCOSException("You must define at least one hostname")
-
-    maintenance_status, found = get_maintenance_status(dcos_client, hostnames)
-    url = dcos_client.master_url('machine/down')
-    for h in hostnames:
-        if h not in found:
-            schedule_maintenance(None,False,None,[h])
-            # XXX: should we refresh ?
-            maintenance_status, found = get_maintenance_status(dcos_client, hostnames)
-        for j in range(len(maintenance_status)):
-            if h == maintenance_status[j]['hostname'] and maintenance_status[j]['state'] == 'DRAINING':
+class Maintenance():
+    """ Maintenance """
+    def __init__(self,hosts=[]):
+        self.dcos_client = mesos.DCOSClient()
+        self.hosts = dict()
+        self.slaves = []
+        self.machine_ids = []
+        self.maintenance_status = None
+        self.scheduled = None
+        self.get_slaves()
+        self.get_scheduled()
+        if len(hosts) != 0:
+            for h in hosts:
                 try:
-                    http.post(url, data=None, json=[maintenance_status[j]])
-                    emitter.publish(h + " is now DOWN")
-                except DCOSException as e:
-                    logger.exception(e)
-                except Exception:
-                    raise DCOSException("Can't complete operation on mesos master")
-            if h == maintenance_status[j]['hostname'] and maintenance_status[j]['state'] == 'DOWN':
-                emitter.publish(h + " is already down --  ignoring")
-    return 0
+                     machine_id = json.loads(h)
+                     if len(machine_id) == 2 and "ip" in machine_id and "hostname" in machine_id:
+                        self.machine_ids.append(machine_id)
+                     else:
+                        emitter.publish("malformed unmanaged host entry: " + str(h))
+                except ValueError as e:
+                    machine_id = find_machine_ids(self.slaves, h)
+                    if machine_id:
+                        self.machine_ids.append(machine_id)
 
+    def get_slaves(self):
+        _slaves = self.dcos_client.get_state_summary()['slaves']
+        for i in range(len(_slaves)):
+            s = _slaves[i]
+            self.slaves.append(
+                {"hostname": s["hostname"],
+                "ip": mesos.parse_pid(s['pid'])[1], "id": s["id"]
+                }
+            )
+    def get_maintenance_status(self, force=False):
+        if not self.maintenance_status or force:
+            self.maintenance_status = get_maintenance_status(self.dcos_client,
+                                                                slaves=self.slaves)
 
-def schedule_maintenance(start, flush, duration, hostnames):
-    """
-    """
-    dcos_client = mesos.DCOSClient()
-    maintenance_status, found = get_maintenance_status(dcos_client, hostnames)
-    if flush and len(hostnames) == 0:
-        if len(maintenance_status) == 0:
+    def get_scheduled(self, force=False):
+        if not self.scheduled or force:
+            self.scheduled = get_scheduled(self.dcos_client)
+
+    def list(self, json_):
+        self.get_maintenance_status()
+        full_maintenance_status = []
+        for e in self.maintenance_status:
+            e["start"] = "None"
+            e["duration"] = None
+            if self.scheduled:
+                for i in range(len(self.scheduled['windows'])):
+                    sched = self.scheduled['windows'][i]
+                    for j in range(len(sched['machine_ids'])):
+                        if compare_machine_ids(sched['machine_ids'][j],e):
+                            e["start"] = long(sched['unavailability']['start']['nanoseconds']) / stons
+                            e["duration"] = long(sched['unavailability']['duration']['nanoseconds']) / stons
+                            full_maintenance_status.append(e)
+        emitting.publish_table(emitter, full_maintenance_status, tables.maintenance_table, json_)
+
+    def flush_all(self):
+        if not self.scheduled:
             emitter.publish("No maintenance schedule found on mesos master")
             return 0
         try:
-            url = dcos_client.master_url('maintenance/schedule')
+            url = self.dcos_client.master_url('maintenance/schedule')
             http.post(url, data=None, json={})
             emitter.publish("Scheduled maintenances flushed")
             return 0
@@ -227,40 +165,21 @@ def schedule_maintenance(start, flush, duration, hostnames):
         except Exception:
             raise DCOSException("Can't complete operation on mesos master")
 
-    if not hostnames:
-        emitter.publish("You must define at least one hostname")
-        return 1
-
-    machine_ids = get_machine_ids(hostnames)
-
-    if not duration:
-        duration = long( DEFAULT_DURATION * stons)
-    else:
-        duration = long(int(duration) * stons)
-
-    if not start:
-        start = long(time.time() * stons )
-    else:
-        start = long(int(start) * stons)
-
-    jsonSchedData = dict()
-    cur_shed = get_schedules(dcos_client)
-    if not cur_shed:
-        jsonSchedData['windows'] = []
-    else:
-        jsonSchedData = cur_shed
+    def flush(self, machine_ids=[]):
+        if len(machine_ids) == 0:
+            machine_ids = self.machine_ids
+        if not self.scheduled:
+            emitter.publish("No maintenance schedule found on mesos master")
+            return 0
         # remove conflicting entries
         to_popi = []
-        for i in range(len(jsonSchedData['windows'])):
-            sched = jsonSchedData['windows'][i]
+        for i in range(len(self.scheduled['windows'])):
+            sched = self.scheduled['windows'][i]
             to_popj = []
             for j in range(len(sched['machine_ids'])):
-                if 'ip' in sched['machine_ids'][j]:
-                    t = sched['machine_ids'][j]['ip']
-                else:
-                    t = sched['machine_ids'][j]['hostname']
-                for h in hostnames:
-                    if h == t:
+                s = sched['machine_ids'][j]
+                for h in machine_ids:
+                    if compare_machine_ids(s, h):
                         to_popj.append(j)
                         break
             # remove
@@ -272,23 +191,112 @@ def schedule_maintenance(start, flush, duration, hostnames):
                 to_popi.append(i)
         offset = 0
         for ii in to_popi:
-            jsonSchedData['windows'].pop(ii - offset)
+            self.scheduled['windows'].pop(ii - offset)
             offset += 1
-    if not flush:
+        emitter.publish("Flushing specified host(s)")
+        try:
+            url = self.dcos_client.master_url('maintenance/schedule')
+            http.post(url, data=None, json=self.scheduled)
+            emitter.publish("Schedules updated")
+        except DCOSException as e:
+            logger.exception(e)
+        except Exception:
+            raise DCOSException("Can't complete operation on mesos master")
+
+    def schedule_maintenance(self,start,duration):
+        if not duration:
+            duration = long( DEFAULT_DURATION * stons)
+        else:
+            duration = long(int(duration) * stons)
+
+        if not start:
+            start = long(time.time() * stons )
+        else:
+            start = long(int(start) * stons)
+
+        if not self.scheduled:
+            self.scheduled = dict()
+            self.scheduled['windows'] = []
         unavailibitiyObj= dict()
-        unavailibitiyObj['machine_ids'] = machine_ids
+        unavailibitiyObj['machine_ids'] = self.machine_ids
         unavailibitiyObj['unavailability']= {
         "start" : { 'nanoseconds': start },
         'duration' : { 'nanoseconds': duration }
         }
-        jsonSchedData['windows'].append(unavailibitiyObj)
+        self.scheduled['windows'].append(unavailibitiyObj)
+
+        try:
+            url = self.dcos_client.master_url('maintenance/schedule')
+            http.post(url, data=None, json=self.scheduled)
+            emitter.publish("Schedules updated")
+        except DCOSException as e:
+            logger.exception(e)
+        except Exception:
+            raise DCOSException("Can't complete operation on mesos master")
+
+    def up(self):
+        to_up = []
+        to_flush = []
+        self.get_maintenance_status()
+        for m in range(len(self.machine_ids)):
+            for s in range(len(self.maintenance_status)):
+                if compare_machine_ids(self.machine_ids[m],self.maintenance_status[s]):
+                    add = {"hostname": self.maintenance_status[s]["hostname"], "ip": self.maintenance_status[s]["ip"]}
+                    if self.maintenance_status[s]['state'] == "DOWN":
+                        to_up.append(add)
+                    if self.maintenance_status[s]['state'] == "DRAINING":
+                        to_flush.append(add)
+        if len(to_flush) > 0:
+            self.flush(machine_ids=to_flush)
+        try:
+            url = self.dcos_client.master_url('machine/up')
+            http.post(url, data=None, json=to_up)
+            emitter.publish("submitted hosts are now UP")
+        except DCOSException as e:
+            logger.exception(e)
+        except Exception:
+            raise DCOSException("Can't complete operation on mesos master")
+        return 0
+
+    def down(self):
+        to_down = []
+        self.get_maintenance_status()
+        for m in range(len(self.machine_ids)):
+            for s in range(len(self.maintenance_status)):
+                if compare_machine_ids(self.machine_ids[m],self.maintenance_status[s]):
+                    add = {"hostname": self.maintenance_status[s]["hostname"], "ip": self.maintenance_status[s]["ip"]}
+                    if self.maintenance_status[s]['state'] == "DRAINING":
+                        to_down.append(add)
+        try:
+            url = self.dcos_client.master_url('machine/down')
+            http.post(url, data=None, json=to_down)
+            emitter.publish("submitted hosts are now DOWN")
+        except DCOSException as e:
+            logger.exception(e)
+        except Exception:
+            raise DCOSException("Can't complete operation on mesos master")
+        return 0
+
+def list(json_):
+    m = Maintenance()
+    m.list(json_)
+
+def up(hosts):
+    m = Maintenance(hosts=hosts)
+    m.up()
+
+def down(hosts):
+    m = Maintenance(hosts=hosts)
+    m.down()
+
+def flush_schedule(hosts):
+    m = Maintenance(hosts=hosts)
+    if len(hosts) == 0:
+        m.flush_all()
     else:
-        emitter.publish("Flushing specified host(s)")
-    try:
-        url = dcos_client.master_url('maintenance/schedule')
-        http.post(url, data=None, json=jsonSchedData)
-        emitter.publish("Schedules updated")
-    except DCOSException as e:
-        logger.exception(e)
-    except Exception:
-        raise DCOSException("Can't complete operation on mesos master")
+        m.flush()
+
+
+def schedule_maintenance(start, duration, hosts):
+    m = Maintenance(hosts=hosts)
+    m.schedule_maintenance(start, duration)
