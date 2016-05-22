@@ -69,7 +69,7 @@ mesos-agent03  192.168.100.30  dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S8
 mesos-agent00  192.168.100.8   dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S4
 
 ```
-
+### Limitations
 - flushing all maintenance schedules silently fails if at least one host is DOWN.
 - quite slow
 ### ToDo
