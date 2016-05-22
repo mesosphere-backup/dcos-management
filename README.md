@@ -79,7 +79,11 @@ mesos-agent00.local  DOWN   1463863101      3600
 ### Limitations
 - flushing all maintenance schedules silently fails if at least one host is DOWN.
 - marking an host as DOWN is a sequential operation
+- only works wiht IP or hostname
 
 ### ToDo
 - fix flush when some host are down
 - more doc
+
+### Known bugs
+- up and down operation are broken with IP
