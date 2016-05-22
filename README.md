@@ -63,10 +63,10 @@ $ dcos management maintenance up '{"hostname": "mesos-agent02", "ip": "192.168.1
 submitted hosts are now UP
 $ dcos node
    HOSTNAME           IP                           ID
-192.168.100.27  192.168.100.27  dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S5
-192.168.100.28  192.168.100.28  dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S12
-192.168.100.30  192.168.100.30  dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S8
-192.168.100.8   192.168.100.8   dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S4
+mesos-agent01  192.168.100.27  dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S5
+mesos-agent02  192.168.100.28  dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S12
+mesos-agent03  192.168.100.30  dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S8
+mesos-agent00  192.168.100.8   dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S4
 
 ```
 
