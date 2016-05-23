@@ -3,10 +3,10 @@
 Usage:
     dcos management --info
     dcos management maintenance list [--json]
-    dcos management maintenance up <hostname>...
+    dcos management maintenance up ( <hostname>... | --all)
     dcos management maintenance down <hostname>...
     dcos management maintenance schedule add [--start=<date>] [--duration=<duration>] [<hostname>...]
-    dcos management maintenance schedule flush  [<hostname>...]
+    dcos management maintenance schedule remove  ( [<hostname>...] | --all)
 
 Options:
     --help           Show this screen
@@ -66,7 +66,7 @@ def _cmds():
 
         cmds.Command(
             hierarchy=['management','maintenance', 'up'],
-            arg_keys=['<hostname>'],
+            arg_keys=['<hostname>', '--all'],
             function=maintenance.up),
 
         cmds.Command(
@@ -75,8 +75,8 @@ def _cmds():
             function=maintenance.down),
 
         cmds.Command(
-            hierarchy=['management','maintenance', 'schedule', 'flush'],
-            arg_keys=['<hostname>'],
+            hierarchy=['management','maintenance', 'schedule', 'remove'],
+            arg_keys=['<hostname>','--all'],
             function=maintenance.flush_schedule),
 
         cmds.Command(

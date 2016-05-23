@@ -27,13 +27,13 @@ $ dcos management maintenance schedule add --start=$(date "+%s") --duration=7200
 Schedules updated
 $ dcos management maintenance list
 HOST            IP              ID                                        STATE     START       DURATION
-mesos-agent01  192.168.100.27  dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S5   DRAINING  1463955032      7200
+mesos-agent00  192.168.100.27  dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S5   DRAINING  1463955032      7200
 mesos-agent01  192.168.100.28  dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S11  DRAINING  1463955032      7200
 
 ```
 #### Cancel maintenance for agent01
 ```
-$ dcos management maintenance schedule flush 192.168.100.27
+$ dcos management maintenance schedule remove 192.168.100.27
 Flushing specified host(s)
 Schedules updated
 $ dcos management maintenance list
@@ -69,10 +69,10 @@ mesos-agent03  192.168.100.30  dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S8
 mesos-agent00  192.168.100.8   dd85d3f3-ecc5-4f9d-b851-dc88086834ff-S4
 
 ```
-### Limitations
-- flushing all maintenance schedules silently fails if at least one host is DOWN.
-- quite slow
-### ToDo
-- fix flush when some host are down
-- more doc
 
+### Limitations
+- quite slow
+
+### ToDo
+- more doc
+- tests
