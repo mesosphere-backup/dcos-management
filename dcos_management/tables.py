@@ -19,6 +19,7 @@ def maintenance_table(maintenance):
         ("STATE", lambda t: t["state"]),
         ("START", lambda t: t["start"]),
         ("DURATION", lambda t: t["duration"]),
+        ("EXPIRED", lambda t: t["expired"]),
 
     ])
 
@@ -29,4 +30,5 @@ def maintenance_table(maintenance):
     tb.align["STATE"] = "l"
     tb.align["START"] = "l"
     tb.align["DURATION"] = "r"
+    tb.align["EXPIRED"] = "c"
     return tb

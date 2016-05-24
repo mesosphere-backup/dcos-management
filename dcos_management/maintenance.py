@@ -2,7 +2,6 @@ import socket
 import json
 import time
 
-import sys
 
 from dcos import emitting, http, util, mesos
 from dcos_management import tables
@@ -18,36 +17,75 @@ logger = util.get_logger(__name__)
 # FIXME: be more pedantic on returns
 def find_machine_id(agents, host):
     """
-    :param agents: Array of mesos agents
-    :type: list
+    :param agents: Array of mesos agents properties (machine_id + additional infos)
+    :type: list of dict
     :param host: Host to find. Can be ip, hostname of agent ID
     :type: string
-    :returns: a machine_id-like
+    :returns: a machine_id
     :rtype: dict
     """
-    for i in range(len(agents)):
-        s = agents[i]
+    for agent in agents:
         # down agent
-        if 'state' in s:
-            if s['state'] == "DOWN":
-                s['id'] = ""
-        if host in [s['hostname'], s['ip'], s['id']]:
-            return {"hostname": s['hostname'], "ip": s['ip']}
+        if 'state' in agent:
+            if agent['state'] == "DOWN":
+                agent['id'] = ""
+        if host in [agent['hostname'], agent['ip'], agent['id']]:
+            return {"hostname": agent['hostname'], "ip": agent['ip']}
     return None
 
 def compare_machine_ids( machine_id_a, machine_id_b):
     """
-    :params machine_id_a:
+    :param machine_id_a: machine_id
+    :type: dict
+    :param machine_id_a: machine_id
+    :type: dict
+    :return: true if both machine_id match, else False
+    :rtype: boolean
     """
-    if machine_id_a['hostname'] == machine_id_b['hostname'] and machine_id_a['ip'] == machine_id_b['ip']:
-       return True
-    return False
+    return machine_id_a['hostname'] == machine_id_b['hostname'] and machine_id_a['ip'] == machine_id_b['ip']
 
 def find_matching_agent(agents, machine_id):
-    for i in range(len(agents)):
-        if compare_machine_ids(agents[i], machine_id):
-            return agents[i]
+    """
+    :param agents: a list machine_id (dict)
+    :type: array of dict
+    :param machine_id: a machine_id dict
+    :type: dict
+    :return: machine_id if found
+    :rtype: dict
+    """
+    for agent in agents:
+        if compare_machine_ids(agent, machine_id):
+            return agent
     return None
+
+def lookup_and_tag(machine_ids, state, agents, attribute=None):
+    """
+    :param machine_ids: An object containing extended machine ids dicts
+    :type: list of dict
+    :param state: State arbitrally associated with machine_ids
+    :type: string
+    :param agents: A list of extended machine ids dict from agents list
+    :type: list of dict
+    :param attribute: key to locate machine_ids inside `machines_ids`
+    :type: string
+    :return: tagged agents
+    :rtype: array of dict
+
+    """
+    _machine_ids = []
+    for m in machine_ids:
+        if attribute:
+            machine_id = m[attribute]
+        else:
+            machine_id = m
+        agent = find_matching_agent(agents,machine_id)
+        if not agent:
+            machine_id['id'] = ""
+        else:
+            machine_id = agent
+        machine_id['state'] = state
+        _machine_ids.append(machine_id)
+    return _machine_ids
 
 def get_maintenance_status(dcos_client, agents=[]):
     """
@@ -64,27 +102,9 @@ def get_maintenance_status(dcos_client, agents=[]):
         req = http.get(url).json()
         # XXX: to refactor
         if 'draining_machines' in req:
-            machine_ids = req['draining_machines']
-            for m in machine_ids:
-                machine_id = m['id']
-                agent = find_matching_agent(agents,machine_id)
-                if not agent:
-                    machine_id['id'] = ""
-                else:
-                    machine_id = agent
-                machine_id['state'] = "DRAINING"
-                maintenance_status.append(machine_id)
+            maintenance_status.extend(lookup_and_tag(req['draining_machines'], "DRAINING", agents, "id"))
         if 'down_machines' in req:
-            machine_ids = req['down_machines']
-            for m in machine_ids:
-                machine_id = m
-                agent = find_matching_agent(agents,machine_id)
-                if not agent:
-                    machine_id['id'] = ""
-                else:
-                    machine_id = agent
-                machine_id['state'] = "DOWN"
-                maintenance_status.append(machine_id)
+            maintenance_status.extend(lookup_and_tag(req['down_machines'], "DOWN", agents, None))
         return maintenance_status
     except DCOSException as e:
         logger.exception(e)
@@ -110,6 +130,16 @@ def get_scheduled(dcos_client):
         raise DCOSException("Unable to fetch scheduled maintenance windows from mesos master")
 
 def get_machine_ids(hosts, agents=[], maintenance_status=[]):
+    """
+    :param host:
+    :type:
+    :param agents:
+    :type:
+    :param maintenance_status: list of dict of maintenance status,
+    :type:
+    :returns: list of  machine_ids
+    :rtype: list of machine_id, dict
+    """
     machine_ids = []
     md = agents + maintenance_status
     for h in hosts:
@@ -129,18 +159,18 @@ def filter_agents(machine_ids=[], maintenance_status=[]):
     not_scheduled = []
     down = []
     draining = []
-    for m in range(len(machine_ids)):
+    for machine_id in machine_ids:
         scheduled = False
-        for s in range(len(maintenance_status)):
-            if compare_machine_ids(machine_ids[m],maintenance_status[s]):
-                if maintenance_status[s]['state'] == "DOWN":
-                    down.append(machine_ids[m])
-                if maintenance_status[s]['state'] == "DRAINING":
-                    draining.append(machine_ids[m])
+        for ms in maintenance_status:
+            if compare_machine_ids(machine_id,ms):
+                if ms['state'] == "DOWN":
+                    down.append(machine_id)
+                if ms['state'] == "DRAINING":
+                    draining.append(machine_id)
                 scheduled = True
                 break
         if not scheduled:
-            not_scheduled.append(machine_ids[m])
+            not_scheduled.append(machine_id)
     return not_scheduled, down, draining
 
 
@@ -153,19 +183,20 @@ class Maintenance():
         self.scheduled = None
         self.maintenance_status = None
         self.machine_ids = []
+        self.full_maintenance_status = []
 
         self.get_agents()
         self.get_scheduled()
         self.get_maintenance_status()
         self.get_machines_ids(hosts)
+        self.get_full_maintenance_status()
 
     def get_agents(self):
         _agents = self.dcos_client.get_state_summary()['slaves']
-        for i in range(len(_agents)):
-            s = _agents[i]
+        for agent in agents:
             self.agents.append(
-                {"hostname": s['hostname'],
-                "ip": mesos.parse_pid(s['pid'])[1], "id": s['id']
+                {"hostname": agent['hostname'],
+                "ip": mesos.parse_pid(agent['pid'])[1], "id": agent['id']
                 }
             )
     def get_all_agents(self):
@@ -189,25 +220,30 @@ class Maintenance():
         self.machine_ids = get_machine_ids(hosts, agents=self.agents, maintenance_status=self.maintenance_status)
 
 
-    def list(self, json_):
-        full_maintenance_status = []
-        for e in self.maintenance_status:
-            e['start'] = "None"
-            e['duration'] = None
+    def get_full_maintenance_status(self):
+        for host in self.maintenance_status:
+            host['start'] = "None"
+            host['duration'] = None
             if self.scheduled:
-                for i in range(len(self.scheduled['windows'])):
-                    sched = self.scheduled['windows'][i]
-                    for j in range(len(sched['machine_ids'])):
-                        if compare_machine_ids(sched['machine_ids'][j],e):
-                            e['start'] = long(sched['unavailability']['start']['nanoseconds']) / stons
-                            e['duration'] = long(sched['unavailability']['duration']['nanoseconds']) / stons
-                            full_maintenance_status.append(e)
+                for schedule in self.scheduled['windows']:
+                    for scheduled_host in schedule['machine_ids']:
+                        if compare_machine_ids(scheduled_host,host):
+                            host['start'] = long(schedule['unavailability']['start']['nanoseconds']) / stons
+                            host['duration'] = long(schedule['unavailability']['duration']['nanoseconds']) / stons
+                            host["expired"] = False if (time.time() < (host['start'] + host['duration'])) else True
+                            self.full_maintenance_status.append(host)
 
-        emitting.publish_table(emitter, full_maintenance_status, tables.maintenance_table, json_)
+    def list(self, json_):
+        emitting.publish_table(emitter, self.full_maintenance_status, tables.maintenance_table, json_)
 
     def flush_all(self):
-        not_scheduled, down, draining = filter_agents(self.get_all_agents(),self.maintenance_status)
+        not_scheduled, down, draining = filter_agents(self.get_all_agents(),self.full_maintenance_status)
         self.flush(draining)
+
+    # WIP
+    #   def flush_expired(self):
+    #     not_scheduled, down, draining = filter_agents(self.get_all_agents(),self.full_maintenance_status, True)
+    #     self.flush(draining)
 
     def flush(self, m_ids=[]):
         if len(m_ids) == 0:
@@ -217,11 +253,9 @@ class Maintenance():
             return 0
         # remove conflicting entries
         to_popi = []
-        for i in range(len(self.scheduled['windows'])):
-            sched = self.scheduled['windows'][i]
+        for sched in self.scheduled['windows']:
             to_popj = []
-            for j in range(len(sched['machine_ids'])):
-                s = sched['machine_ids'][j]
+            for s in sched['machine_ids']:
                 for h in m_ids:
                     if compare_machine_ids(s, h):
                         to_popj.append(j)
@@ -250,7 +284,7 @@ class Maintenance():
     def schedule_maintenance(self,start,duration, m_ids = []):
         if len(m_ids) == 0:
             m_ids = self.machine_ids
-        up, down, draining = filter_agents(m_ids, self.maintenance_status)
+        up, down, draining = filter_agents(m_ids, self.full_maintenance_status)
 
         machine_ids = up + draining
         if len(machine_ids) == 0:
@@ -288,14 +322,14 @@ class Maintenance():
             raise DCOSException("Can't complete operation on mesos master")
 
     def up_all(self):
-        not_scheduled, down, draining = filter_agents(self.get_all_agents(),self.maintenance_status)
+        not_scheduled, down, draining = filter_agents(self.get_all_agents(),self.full_maintenance_status)
         self.up(down)
         self.flush(draining)
 
     def up(self,m_ids=[]):
         if len(m_ids) == 0:
             m_ids = self.machine_ids
-        not_scheduled, down, draining = filter_agents(m_ids, self.maintenance_status)
+        not_scheduled, down, draining = filter_agents(m_ids, self.full_maintenance_status)
         if len(draining) > 0:
             self.flush(machine_ids=draining)
 
@@ -312,7 +346,7 @@ class Maintenance():
     def down(self, m_ids=[]):
         if len(m_ids) == 0:
             m_ids = self.machine_ids
-        not_scheduled, down, draining = filter_agents(m_ids, self.maintenance_status)
+        not_scheduled, down, draining = filter_agents(m_ids, self.full_maintenance_status)
 
         self.schedule_maintenance(None,None, not_scheduled)
 
@@ -350,6 +384,9 @@ def flush_schedule(hosts, all):
     m = Maintenance(hosts=hosts)
     if all:
         m.flush_all()
+    # WIP
+    # elif expired:
+    #     m.flush_expired()
     else:
         if len(hosts) == 0:
             emitter.publish("You must defined at least one host")
